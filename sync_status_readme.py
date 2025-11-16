@@ -1,13 +1,16 @@
 import os
 import subprocess
 import re
+import requests
 from datetime import datetime, timedelta
 import pytz
 import logging
 
 # Constants
-START_DATE = datetime.fromisoformat(os.environ['START_DATE']).replace(tzinfo=pytz.UTC)
-END_DATE = datetime.fromisoformat(os.environ['END_DATE']).replace(tzinfo=pytz.UTC)
+START_DATE = datetime.fromisoformat(os.environ.get(
+    'START_DATE', '2025-03-31T00:00:00+00:00')).replace(tzinfo=pytz.UTC)
+END_DATE = datetime.fromisoformat(os.environ.get(
+    'END_DATE', '2025-04-12T23:59:59+00:00')).replace(tzinfo=pytz.UTC)
 DEFAULT_TIMEZONE = 'Asia/Shanghai'
 FILE_SUFFIX = '.md'
 README_FILE = 'README.md'
@@ -59,38 +62,18 @@ def get_date_range():
     return [START_DATE + timedelta(days=x) for x in range((END_DATE - START_DATE).days + 1)]
 
 def get_user_timezone(file_content):
-    yaml_match = re.search(r'---\s*\ntimezone:\s*([^\n]+)\s*\n---', file_content)
+    yaml_match = re.search(r'---\s*\ntimezone:\s*(\S+)\s*\n---', file_content)
     if yaml_match:
-        timezone_str = yaml_match.group(1).strip()
-        # 1) Try IANA timezone names directly (e.g., "Asia/Kolkata")
+        timezone_str = yaml_match.group(1)
         try:
             return pytz.timezone(timezone_str)
         except pytz.exceptions.UnknownTimeZoneError:
-            pass
-        # 2) Support UTC/GMT fixed offsets like UTC+5:30, UTC-3, UTC+0530, GMT+9, etc.
-        s = timezone_str.strip().upper().replace("UTC ", "UTC").replace("GMT ", "GMT")
-        # Special case: plain UTC/GMT
-        if s in ("UTC", "GMT", "Z"):
-            return pytz.UTC
-        # Match formats: UTC+H, UTC+HH, UTC+H:MM, UTC+HH:MM, UTC+HHMM (and GMT variants)
-        m = re.match(r'^(?:UTC|GMT)\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?$', s)
-        if m:
-            sign = 1 if m.group(1) == '+' else -1
-            hours = int(m.group(2))
-            minutes = int(m.group(3)) if m.group(3) else 0
-            total_minutes = sign * (hours * 60 + minutes)
-            return pytz.FixedOffset(total_minutes)
-        # Match decimal hours like UTC+5.5 or UTC-3.75
-        m = re.match(r'^(?:UTC|GMT)\s*([+-])\s*(\d{1,2})\.(\d+)$', s)
-        if m:
-            sign = 1 if m.group(1) == '+' else -1
-            hours = int(m.group(2))
-            frac = float('0.' + m.group(3))
-            minutes = int(round(frac * 60))
-            total_minutes = sign * (hours * 60 + minutes)
-            return pytz.FixedOffset(total_minutes)
-        logging.warning(f"Invalid timezone format: {timezone_str}. Using default {DEFAULT_TIMEZONE}.")
-        return pytz.timezone(DEFAULT_TIMEZONE)
+            try:
+                offset = int(timezone_str[3:])
+                return pytz.FixedOffset(offset * 60)
+            except ValueError:
+                logging.warning(f"Invalid timezone format: {timezone_str}. Using default {DEFAULT_TIMEZONE}.")
+                return pytz.timezone(DEFAULT_TIMEZONE)
     return pytz.timezone(DEFAULT_TIMEZONE)
 
 def extract_content_between_markers(file_content):
@@ -118,9 +101,6 @@ def find_date_in_content(content, local_date):
         r'#\s*' + local_date.strftime("%m/%d").lstrip('0').replace('/0', '/'),
         r'##\s*' + local_date.strftime("%m/%d").lstrip('0').replace('/0', '/'),
         r'###\s*' + local_date.strftime("%m/%d").lstrip('0').replace('/0', '/'),
-        r'#\s*' + local_date.strftime("%Y-%m-%d"),
-        r'##\s*' + local_date.strftime("%Y-%m-%d"),
-        r'###\s*' + local_date.strftime("%Y-%m-%d"),
         r'#\s*' + local_date.strftime("%m.%d").zfill(5),
         r'##\s*' + local_date.strftime("%m.%d").zfill(5),
         r'###\s*' + local_date.strftime("%m.%d").zfill(5)
@@ -129,47 +109,25 @@ def find_date_in_content(content, local_date):
     return re.search(combined_pattern, content)
 
 def get_content_for_date(content, start_pos):
-    next_date_pattern = r'#+\s*(\d{4}[\.\/\-])?(\d{1,2}[\.\/\-]\d{1,2})'
+    next_date_pattern = r'###\s*(\d{4}\.)?(\d{1,2}[\.\/]\d{1,2})'
     next_date_match = re.search(next_date_pattern, content[start_pos:])
     if next_date_match:
         return content[start_pos:start_pos + next_date_match.start()]
     return content[start_pos:]
 
-def get_local_day_bounds_for_label(label_date, user_tz):
-    """
-    Given a program label date (UTC tz-aware datetime) and a user's timezone,
-    compute the start and end of that calendar day in the user's local time.
-    Example: label 2024-10-17 and Asia/Shanghai ->
-    local_start = 2024-10-17 00:00+08:00, local_end = 2024-10-18 00:00+08:00.
-    """
-    try:
-        local_start_naive = datetime(label_date.year, label_date.month, label_date.day, 0, 0, 0)
-        local_start = user_tz.localize(local_start_naive)
-    except Exception:
-        # Fallback: construct with tzinfo if localize is unavailable
-        local_start = datetime(label_date.year, label_date.month, label_date.day, 0, 0, 0, tzinfo=user_tz)
-    local_end = local_start + timedelta(days=1)
-    return local_start, local_end
-
 def check_md_content(file_content, date, user_tz):
-    """
-    修复后的内容检查函数 - 直接使用 UTC 日期匹配
-    """
     try:
         content = extract_content_between_markers(file_content)
-        
-        # Use the label date directly for matching (the table header uses the same
-        # calendar date regardless of timezone).
-        label_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
-        current_date_match = find_date_in_content(content, label_date)
-        
+        local_date = date.astimezone(user_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        current_date_match = find_date_in_content(content, local_date)
+
         if not current_date_match:
-            logging.info(f"No match found for date {label_date.strftime('%Y-%m-%d')}")
+            logging.info(f"No match found for date {local_date.strftime('%Y-%m-%d')}")
             return False
 
         date_content = get_content_for_date(content, current_date_match.end())
         date_content = re.sub(r'\s', '', date_content)
-        logging.info(f"Content length for {label_date.strftime('%Y-%m-%d')}: {len(date_content)}")
+        logging.info(f"Content length for {local_date.strftime('%Y-%m-%d')}: {len(date_content)}")
         return len(date_content) > 10
     except Exception as e:
         logging.error(f"Error in check_md_content: {str(e)}")
@@ -177,34 +135,22 @@ def check_md_content(file_content, date, user_tz):
 
 def get_user_study_status(nickname):
     user_status = {}
-    # nickname 可能是相对路径（如果文件在子文件夹中）或文件名
-    if nickname.endswith(FILE_SUFFIX):
-        file_name = nickname
-    else:
-        file_name = f"{nickname}{FILE_SUFFIX}"
+    file_name = f"{nickname}{FILE_SUFFIX}"
     try:
         with open(file_name, 'r', encoding='utf-8') as file:
             file_content = file.read()
         user_tz = get_user_timezone(file_content)
         logging.info(f"File content length for {nickname}: {len(file_content)} user_tz: {user_tz}")
-        now_local = datetime.now(user_tz)
+        current_date = datetime.now(user_tz).replace(hour=0, minute=0, second=0, microsecond=0)
 
         for date in get_date_range():
-            # Keyed by UTC midnight for consistency across the script
-            start_utc = date.replace(hour=0, minute=0, second=0, microsecond=0)
-
-            # Use the user's local calendar day boundaries for the label date
-            start_local, end_local = get_local_day_bounds_for_label(date, user_tz)
-          
-            if now_local < start_local:
-                # Future day for this user
-                user_status[start_utc] = " "
-            elif now_local >= end_local:
-                # Past day in user's local time
-                user_status[start_utc] = "✅" if check_md_content(file_content, date, user_tz) else "⭕️"
+            local_date = date.astimezone(user_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+            if date.day == current_date.day:
+                user_status[date] = "✅" if check_md_content(file_content, date, pytz.UTC) else " "
+            elif date > current_date:
+                user_status[date] = " "
             else:
-                # In-progress (today for this user): show ✅ if already posted, else blank
-                user_status[start_utc] = "✅" if check_md_content(file_content, date, user_tz) else " "
+                user_status[date] = "✅" if check_md_content(file_content, date, pytz.UTC) else "⭕️"
         logging.info(f"Successfully processed file for user: {nickname}")
     except FileNotFoundError:
         logging.error(f"Error: Could not find file {file_name}")
@@ -239,85 +185,20 @@ def check_weekly_status(user_status, date, user_tz):
         return "⭕️"
 
 def get_all_user_files():
-    """
-    递归查找所有用户文件，支持子文件夹中的 .md 文件
-    返回格式: (nickname, relative_path)
-    """
     exclude_prefixes = ('template', 'readme')
-    user_files = []
-    
-    # 递归遍历所有目录
-    for root, dirs, files in os.walk('.'):
-        # 跳过 .git 目录
-        if '.git' in root:
-            continue
-            
-        for f in files:
-            if f.lower().endswith(FILE_SUFFIX.lower()):
-                # 检查是否应该排除
-                should_exclude = False
-                for prefix in exclude_prefixes:
-                    if f.lower().startswith(prefix):
-                        should_exclude = True
-                        break
-                
-                if not should_exclude:
-                    # 获取相对路径
-                    rel_path = os.path.join(root, f)
-                    # 标准化路径（处理 ./ 前缀）
-                    if rel_path.startswith('./'):
-                        rel_path = rel_path[2:]
-                    # 获取文件名（不含扩展名）作为 nickname
-                    nickname = f[:-len(FILE_SUFFIX)]
-                    user_files.append((nickname, rel_path))
-    
-    # 如果文件在子文件夹中，使用相对路径作为标识
-    # 否则使用文件名
-    result = []
-    for nickname, rel_path in user_files:
-        if os.path.dirname(rel_path):  # 在子文件夹中
-            # 使用相对路径作为标识，但去掉扩展名
-            result.append(rel_path[:-len(FILE_SUFFIX)])
-        else:  # 在根目录
-            result.append(nickname)
-    
-    return result
+    return [f[:-len(FILE_SUFFIX)] for f in os.listdir('.')
+            if f.lower().endswith(FILE_SUFFIX.lower())
+            and not f.lower().startswith(exclude_prefixes)]
 
 def extract_name_from_row(row):
-    """
-    从表格行中提取用户标识符
-    优先从 URL 中提取文件路径（去掉扩展名），如果没有则使用显示名称
-    """
-    # 尝试从 markdown 链接的 URL 中提取文件路径
-    url_match = re.search(r'\[([^\]]+)\]\(([^)]+)\)', row)
-    if url_match:
-        display_name = url_match.group(1).strip()
-        url = url_match.group(2).strip()
-        # 从 URL 中提取文件路径（去掉 blob/main/ 前缀和可能的查询参数）
-        # 例如: https://github.com/owner/repo/blob/main/path/to/file.md
-        # 或: path/to/file.md
-        if 'blob/main/' in url:
-            file_path = url.split('blob/main/')[-1].split('?')[0].split('#')[0]
-        else:
-            # 如果不是 GitHub URL，假设是相对路径
-            file_path = url.split('?')[0].split('#')[0]
-        
-        # 去掉 .md 扩展名
-        if file_path.endswith(FILE_SUFFIX):
-            file_path = file_path[:-len(FILE_SUFFIX)]
-        
-        # 如果文件路径存在且不是根目录的文件，使用文件路径作为标识
-        # 否则使用显示名称
-        if file_path and os.path.dirname(file_path):
-            return file_path
-        else:
-            return display_name
-    
-    # 如果没有找到链接，尝试从普通文本中提取
-    parts = row.split('|')
-    if len(parts) > 1:
-        return parts[1].strip()
-    return None
+    match = re.match(r'\|\s*\[([^\]]+)\]\([^)]+\)\s*\|', row)
+    if match:
+        return match.group(1).strip()
+    else:
+        parts = row.split('|')
+        if len(parts) > 1:
+            return parts[1].strip()
+        return None
 
 def update_readme(content):
     try:
@@ -361,29 +242,17 @@ def update_readme(content):
 def generate_user_row(user):
     user_status = get_user_study_status(user)
     owner, repo = get_repo_info()
-    
-    # 处理文件路径：user 可能是相对路径或文件名
-    if user.endswith(FILE_SUFFIX):
-        file_path = user
-        display_name = os.path.basename(user)[:-len(FILE_SUFFIX)]
-    else:
-        file_path = f"{user}{FILE_SUFFIX}"
-        display_name = user
-    
     if owner and repo:
-        # 确保路径使用正斜杠（GitHub URL 格式）
-        github_path = file_path.replace('\\', '/')
-        repo_url = f"https://github.com/{owner}/{repo}/blob/main/{github_path}"
+        repo_url = f"https://github.com/{owner}/{repo}/blob/main/{user}{FILE_SUFFIX}"
     else:
-        # Fallback to local if repo info is unavailable
-        repo_url = file_path
-    
-    # replace the username with a markdown link
-    user_link = f"[{display_name}]({repo_url})"
+        repo_url = f"{user}{FILE_SUFFIX}"
+    user_link = f"[{user}]({repo_url})"
     new_row = f"| {user_link} |"
     is_eliminated = False
+    absent_count = 0
+    current_week = None
 
-    file_name_to_open = file_path
+    file_name_to_open = f"{user}{FILE_SUFFIX}"
     try:
         with open(file_name_to_open, 'r', encoding='utf-8') as file:
             file_content = file.read()
@@ -392,88 +261,27 @@ def generate_user_row(user):
         return "| " + user_link + " | " + " ⭕️ |" * len(get_date_range()) + "\n"
 
     user_tz = get_user_timezone(file_content)
-    now_local = datetime.now(user_tz)
-    date_range = get_date_range()
-    
-    # 统计每周的打卡情况
-    week_stats = {}  # week_number -> (has_checkin, week_end_date)
-    for date in date_range:
-        start_utc = date.astimezone(pytz.UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-        days_from_start = (start_utc.date() - START_DATE.date()).days
-        week_number = days_from_start // 7
-        if week_number not in week_stats:
-            week_stats[week_number] = {'has_checkin': False, 'week_start': None, 'week_end': None}
-        status = user_status.get(start_utc, "⭕️")
-        if status == "✅":
-            week_stats[week_number]['has_checkin'] = True
-        # 更新该周的开始和结束日期
-        if week_stats[week_number]['week_start'] is None:
-            week_stats[week_number]['week_start'] = date
-        week_stats[week_number]['week_end'] = date
-    
-    # 统计请假次数（完全没有打卡的周数）
-    leave_count = 0
-    for week_num, stats in week_stats.items():
-        # 检查该周是否已经完全结束
-        week_end_date = stats.get('week_end')
-        if week_end_date:
-            _, week_end_local = get_local_day_bounds_for_label(week_end_date, user_tz)
-            # 如果该周已经完全结束且没有打卡，算作请假
-            if now_local >= week_end_local and not stats['has_checkin']:
-                leave_count += 1
-    
-    # 如果请假超过1次，标记为失败
-    if leave_count > 1:
-        is_eliminated = True
-    
-    for i, date in enumerate(date_range):
-        # UTC key for this program label day
-        start_utc = date.astimezone(pytz.UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-
-        # Local day boundaries for this label date
-        start_local, end_local = get_local_day_bounds_for_label(date, user_tz)
-        
-        # 如果已经被淘汰，后续所有天数都显示空
-        if is_eliminated:
+    user_current_day = datetime.now(user_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    for date in get_date_range():
+        user_datetime = date.astimezone(pytz.UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        if is_eliminated or (user_datetime > user_current_day and user_datetime.day > user_current_day.day):
             new_row += " |"
-            continue
-            
-        # 如果是未来的日期，显示空
-        if now_local < start_local:
-            new_row += " |"
-            continue
-        
-        # 获取当前日期的状态
-        current_status = user_status.get(start_utc, "⭕️")
-        
-        # 计算当前日期属于第几个周
-        days_from_start = (start_utc.date() - START_DATE.date()).days
-        week_number = days_from_start // 7
-        
-        # 检查该周是否已经完全结束
-        week_end_date = week_stats.get(week_number, {}).get('week_end')
-        if week_end_date:
-            _, week_end_local = get_local_day_bounds_for_label(week_end_date, user_tz)
-            # 如果该周已经完全结束且没有打卡，且请假次数超过1次，标记为失败
-            if now_local >= week_end_local:
-                week_has_checkin = week_stats.get(week_number, {}).get('has_checkin', False)
-                if not week_has_checkin:
-                    # 计算到当前周为止的请假次数
-                    current_leave_count = 0
-                    for w_num in range(week_number + 1):
-                        w_stats = week_stats.get(w_num, {})
-                        w_end = w_stats.get('week_end')
-                        if w_end:
-                            _, w_end_local = get_local_day_bounds_for_label(w_end, user_tz)
-                            if now_local >= w_end_local and not w_stats.get('has_checkin', False):
-                                current_leave_count += 1
-                    if current_leave_count > 1:
-                        is_eliminated = True
-                        new_row += " ❌ |"
-                        continue
-        
-        new_row += f" {current_status} |"
-            
+        else:
+            user_date = user_datetime
+            week = user_date.isocalendar()[1]
+            if week != current_week:
+                current_week = week
+                absent_count = 0
+            status = user_status.get(user_date, "")
+            if status == "⭕️":
+                absent_count += 1
+                if absent_count > 2:
+                    is_eliminated = True
+                    new_row += " ❌ |"
+                else:
+                    new_row += " ⭕️ |"
+            else:
+                new_row += f" {status} |"
     return new_row + '\n'
 
 def get_repo_info():
@@ -496,6 +304,21 @@ def get_repo_info():
             return None, None
     return owner, repo
 
+def get_fork_count():
+    owner, repo = get_repo_info()
+    if not owner or not repo:
+        logging.error("Failed to get repository information")
+        return None
+    api_url = f"https://api.github.com/repos/{owner}/{repo}"
+    try:
+        response = requests.get(api_url)
+        response.raise_for_status()
+        repo_data = response.json()
+        return repo_data['forks_count']
+    except requests.RequestException as e:
+        logging.error(f"Error fetching fork count: {e}")
+        return None
+
 def calculate_statistics(content):
     start_index = content.find(STATS_START_MARKER)
     end_index = content.find(STATS_END_MARKER)
@@ -509,7 +332,8 @@ def calculate_statistics(content):
         "eliminated_participants": 0,
         "completed_participants": 0,
         "perfect_attendance_users": [],
-        "completed_users": []
+        "completed_users": [],
+        "fork_count": 0
     }
 
     total_match = re.search(r"- 总参与人数:\s*(\d+)", stats_content)
@@ -533,7 +357,9 @@ def calculate_statistics(content):
     if eliminated_match:
         stats["eliminated_participants"] = int(eliminated_match.group(1))
 
-    # 移除 Fork人数 统计解析
+    fork_count_match = re.search(r"- Fork人数:\s*(\d+)", stats_content)
+    if fork_count_match:
+        stats["fork_count"] = int(fork_count_match.group(1))
 
     return stats
 
@@ -553,6 +379,7 @@ def update_statistics(content, stats):
 - 全勤用户: {', '.join(stats['perfect_attendance_users'])}
 - 淘汰人数: {stats["eliminated_participants"]}
 - 淘汰率: {stats["total_participants"] and stats["eliminated_participants"] / stats["total_participants"]:.2%}
+- Fork人数: {stats["fork_count"]}
 {STATS_END_MARKER}"""
     return content[:start_index] + stats_text + content[end_index + len(STATS_END_MARKER):]
 
@@ -564,7 +391,8 @@ def update_statistics_after_end(content, user_files):
         "eliminated_participants": 0,
         "completed_participants": 0,
         "perfect_attendance_users": [],
-        "completed_users": []
+        "completed_users": [],
+        "fork_count": get_fork_count() or 0
     }
 
     # 从表格中提取用户状态
