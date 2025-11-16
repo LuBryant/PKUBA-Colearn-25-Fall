@@ -56,7 +56,18 @@ def print_variables(*args, **kwargs):
         print(f"{name}: {format_value(value)}")
 
 def get_date_range():
+    """获取所有日期范围（用于检查打卡内容）"""
     return [START_DATE + timedelta(days=x) for x in range((END_DATE - START_DATE).days + 1)]
+
+def get_week_range():
+    """获取周的范围，返回每周的开始日期"""
+    weeks = []
+    current_date = START_DATE
+    while current_date <= END_DATE:
+        weeks.append(current_date)
+        # 移动到下一周的开始（周一）
+        current_date += timedelta(days=7)
+    return weeks
 
 def get_user_timezone(file_content):
     yaml_match = re.search(r'---\s*\ntimezone:\s*([^\n]+)\s*\n---', file_content)
@@ -176,6 +187,7 @@ def check_md_content(file_content, date, user_tz):
         return False
 
 def get_user_study_status(nickname):
+    """获取用户每周的打卡状态"""
     user_status = {}
     # nickname 可能是相对路径（如果文件在子文件夹中）或文件名
     if nickname.endswith(FILE_SUFFIX):
@@ -189,29 +201,49 @@ def get_user_study_status(nickname):
         logging.info(f"File content length for {nickname}: {len(file_content)} user_tz: {user_tz}")
         now_local = datetime.now(user_tz)
 
-        for date in get_date_range():
-            # Keyed by UTC midnight for consistency across the script
-            start_utc = date.replace(hour=0, minute=0, second=0, microsecond=0)
-
-            # Use the user's local calendar day boundaries for the label date
-            start_local, end_local = get_local_day_bounds_for_label(date, user_tz)
-          
-            if now_local < start_local:
-                # Future day for this user
-                user_status[start_utc] = " "
-            elif now_local >= end_local:
-                # Past day in user's local time
-                user_status[start_utc] = "✅" if check_md_content(file_content, date, user_tz) else "⭕️"
-            else:
-                # In-progress (today for this user): show ✅ if already posted, else blank
-                user_status[start_utc] = "✅" if check_md_content(file_content, date, user_tz) else " "
+        # 获取所有周的范围
+        week_ranges = get_week_range()
+        
+        for week_start in week_ranges:
+            # 计算该周的所有日期
+            week_end_date = min(week_start + timedelta(days=6), END_DATE)
+            week_dates = []
+            current = week_start
+            while current <= week_end_date and current <= END_DATE:
+                week_dates.append(current)
+                current += timedelta(days=1)
+            
+            # 检查该周是否有任何打卡
+            week_has_checkin = False
+            for date in week_dates:
+                if check_md_content(file_content, date, user_tz):
+                    week_has_checkin = True
+                    break
+            
+            # 计算该周是否已经结束（使用该周最后一天的结束时间）
+            if week_dates:
+                last_day = week_dates[-1]
+                _, week_end_local = get_local_day_bounds_for_label(last_day, user_tz)
+                
+                if now_local < week_start.astimezone(user_tz).replace(hour=0, minute=0, second=0, microsecond=0):
+                    # 未来的周
+                    user_status[week_start] = " "
+                elif now_local >= week_end_local:
+                    # 已过去的周
+                    user_status[week_start] = "✅" if week_has_checkin else "⭕️"
+                else:
+                    # 进行中的周
+                    user_status[week_start] = "✅" if week_has_checkin else " "
+        
         logging.info(f"Successfully processed file for user: {nickname}")
     except FileNotFoundError:
         logging.error(f"Error: Could not find file {file_name}")
-        user_status = {date: "⭕️" for date in get_date_range()}
+        week_ranges = get_week_range()
+        user_status = {week: "⭕️" for week in week_ranges}
     except Exception as e:
         logging.error(f"Unexpected error processing file for {nickname}: {str(e)}")
-        user_status = {date: "⭕️" for date in get_date_range()}
+        week_ranges = get_week_range()
+        user_status = {week: "⭕️" for week in week_ranges}
     return user_status
 
 def check_weekly_status(user_status, date, user_tz):
@@ -327,11 +359,18 @@ def update_readme(content):
             logging.error("Error: Couldn't find the table markers in README.md")
             return content
 
+        week_ranges = get_week_range()
+        # 生成周的表头，格式为 "W1 (11.17)" 表示第1周，从11月17日开始
+        week_headers = []
+        for i, week_start in enumerate(week_ranges, 1):
+            week_end = min(week_start + timedelta(days=6), END_DATE)
+            week_header = f"W{i} ({week_start.strftime('%m.%d')})"
+            week_headers.append(week_header)
+        
         new_table = [
             f'{TABLE_START_MARKER}\n',
-            f'| {FIELD_NAME} | ' + ' | '.join(date.strftime("%m.%d").lstrip('0')
-                       for date in get_date_range()) + ' |\n',
-            '| ------------- | ' + ' | '.join(['----' for _ in get_date_range()]) + ' |\n'
+            f'| {FIELD_NAME} | ' + ' | '.join(week_headers) + ' |\n',
+            '| ------------- | ' + ' | '.join(['----' for _ in week_ranges]) + ' |\n'
         ]
 
         existing_users = set()
@@ -389,90 +428,49 @@ def generate_user_row(user):
             file_content = file.read()
     except FileNotFoundError:
         logging.error(f"Error: Could not find file {file_name_to_open}")
-        return "| " + user_link + " | " + " ⭕️ |" * len(get_date_range()) + "\n"
+        week_ranges = get_week_range()
+        return "| " + user_link + " | " + " ⭕️ |" * len(week_ranges) + "\n"
 
     user_tz = get_user_timezone(file_content)
     now_local = datetime.now(user_tz)
-    date_range = get_date_range()
-    
-    # 统计每周的打卡情况
-    week_stats = {}  # week_number -> (has_checkin, week_end_date)
-    for date in date_range:
-        start_utc = date.astimezone(pytz.UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-        days_from_start = (start_utc.date() - START_DATE.date()).days
-        week_number = days_from_start // 7
-        if week_number not in week_stats:
-            week_stats[week_number] = {'has_checkin': False, 'week_start': None, 'week_end': None}
-        status = user_status.get(start_utc, "⭕️")
-        if status == "✅":
-            week_stats[week_number]['has_checkin'] = True
-        # 更新该周的开始和结束日期
-        if week_stats[week_number]['week_start'] is None:
-            week_stats[week_number]['week_start'] = date
-        week_stats[week_number]['week_end'] = date
+    week_ranges = get_week_range()
     
     # 统计请假次数（完全没有打卡的周数）
     leave_count = 0
-    for week_num, stats in week_stats.items():
-        # 检查该周是否已经完全结束
-        week_end_date = stats.get('week_end')
-        if week_end_date:
-            _, week_end_local = get_local_day_bounds_for_label(week_end_date, user_tz)
-            # 如果该周已经完全结束且没有打卡，算作请假
-            if now_local >= week_end_local and not stats['has_checkin']:
-                leave_count += 1
+    is_eliminated = False
     
-    # 如果请假超过1次，标记为失败
-    if leave_count > 1:
-        is_eliminated = True
-    
-    for i, date in enumerate(date_range):
-        # UTC key for this program label day
-        start_utc = date.astimezone(pytz.UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-
-        # Local day boundaries for this label date
-        start_local, end_local = get_local_day_bounds_for_label(date, user_tz)
+    for i, week_start in enumerate(week_ranges):
+        # 获取该周的状态
+        week_status = user_status.get(week_start, "⭕️")
         
-        # 如果已经被淘汰，后续所有天数都显示空
+        # 计算该周的最后一天
+        week_end_date = min(week_start + timedelta(days=6), END_DATE)
+        _, week_end_local = get_local_day_bounds_for_label(week_end_date, user_tz)
+        
+        # 如果已经被淘汰，后续所有周都显示空
         if is_eliminated:
             new_row += " |"
             continue
-            
-        # 如果是未来的日期，显示空
-        if now_local < start_local:
+        
+        # 如果是未来的周，显示空
+        week_start_local = week_start.astimezone(user_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        if now_local < week_start_local:
             new_row += " |"
             continue
         
-        # 获取当前日期的状态
-        current_status = user_status.get(start_utc, "⭕️")
+        # 如果该周已经完全结束
+        if now_local >= week_end_local:
+            # 如果该周没有打卡，算作请假
+            if week_status == "⭕️":
+                leave_count += 1
+                # 如果请假超过1次，标记为失败
+                if leave_count > 1:
+                    is_eliminated = True
+                    new_row += " ❌ |"
+                    continue
         
-        # 计算当前日期属于第几个周
-        days_from_start = (start_utc.date() - START_DATE.date()).days
-        week_number = days_from_start // 7
-        
-        # 检查该周是否已经完全结束
-        week_end_date = week_stats.get(week_number, {}).get('week_end')
-        if week_end_date:
-            _, week_end_local = get_local_day_bounds_for_label(week_end_date, user_tz)
-            # 如果该周已经完全结束且没有打卡，且请假次数超过1次，标记为失败
-            if now_local >= week_end_local:
-                week_has_checkin = week_stats.get(week_number, {}).get('has_checkin', False)
-                if not week_has_checkin:
-                    # 计算到当前周为止的请假次数
-                    current_leave_count = 0
-                    for w_num in range(week_number + 1):
-                        w_stats = week_stats.get(w_num, {})
-                        w_end = w_stats.get('week_end')
-                        if w_end:
-                            _, w_end_local = get_local_day_bounds_for_label(w_end, user_tz)
-                            if now_local >= w_end_local and not w_stats.get('has_checkin', False):
-                                current_leave_count += 1
-                    if current_leave_count > 1:
-                        is_eliminated = True
-                        new_row += " ❌ |"
-                        continue
-        
-        new_row += f" {current_status} |"
+        # 显示该周的状态
+        new_row += f" {week_status} |"
             
     return new_row + '\n'
 
