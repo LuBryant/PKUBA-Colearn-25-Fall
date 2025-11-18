@@ -21,7 +21,7 @@ timezone: UTC+8
 <!-- Content_START -->
 
 ### 2025.11.18
-Part I - 动手部署一个智能合约
+Part I - 动手部署一个智能合约 writeup
 1. 完成对报名  
 2. 测试网络领水：https://www.alchemy.com/faucets/ethereum-sepolia
 address：0x00000000bb09009cdcd358d6c5ce6f56611577f1  
