@@ -753,11 +753,232 @@ contract Solver {
 
 
 ### 2025.12.2
-go语言及其在区块链应用中的地位?
-go兼顾了C/C++的性能、Python/Java的开发效率，区块链技术的核心需求是高性能、高并发、去中心化、安全性，而 Go 语言的特性与这些需求高度契合，使其成为区块链领域的 “首选开发语言” 之一。
 
+#### Go 语言与区块链基础
 
+##### Q1: Go 语言及其在区块链应用中的地位？
 
+Go 兼顾了 C/C++ 的性能、Python/Java 的开发效率。区块链技术的核心需求是高性能、高并发、去中心化、安全性，而 Go 语言的特性与这些需求高度契合，使其成为区块链领域的 "首选开发语言" 之一。
+
+##### Q2: 什么是 Geth？
+
+Geth 是一种以太坊客户端，遵循以太坊协议的软件实现，安装后才算加入以太坊网络。
+
+- **节点角色**：加入了以太坊网络后，自己的机器也算是网络中的一个节点。
+- **默认行为**：默认情况下启动 Geth，是变成了全节点，会同步整个以太坊网络的所有区块和交易记录。也可以只变成轻节点和归档节点。
+
+##### Q3: 什么是 RPC？
+
+RPC（Remote Procedure Call，远程过程调用）。RPC 是通信协议，API 遵循 RPC 协议，来提供一系列的应用服务：
+
+- 查询账户余额、交易、区块等信息
+- 调用合约的只读方法（`eth_call`）
+- 广播一笔签名好的交易（`eth_sendRawTransaction`）
+
+**Geth 启动命令示例**
+
+```bash
+geth --sepolia --http --http.api eth,net,web3
+```
+
+- 这条命令会启动一个连到 Sepolia 测试网的节点，并在本地开一个 HTTP RPC 接口，供你或其他程序来查询链上数据。
+- 这个接口是你本地 Geth 节点对外提供的 "数据查询入口"；查询 Sepolia 测试网数据不必须通过它，但通过它查询更自主；你启动的是 "以太坊 Sepolia 测试网的公共全节点"，而非私有节点。
+
+**关于私有 RPC**
+
+"私有 RPC"，本质是 "搭建完全独立的私有以太坊网络，再为这个私有网络的节点开放 RPC 接口" —— 这个 RPC 只服务于你的私有链，不连接主网 / 测试网，数据和访问权完全由你掌控。
+
+如果要创建私有 RPC 接口：
+1. 先建「私有以太坊网络」：用自定义创世块（规则手册）启动，只有你指定的节点能加入；
+2. 再开「私有 RPC 接口」：给这个私有节点开放 HTTP RPC，仅本地（或你授权的 IP）能访问；
+3. 最终效果：通过 `http://localhost:8545`（或自定义端口），只能查询 / 操作你的私有链数据，外人无法访问。
+
+##### Q4: Go 语法基础
+
+**初始化项目**
+
+```bash
+go mod init week3-geth
+```
+这是 Go 里的「项目模块初始化命令」，和 Python 的 `pip init`（或手动建 `requirements.txt`）功能类似，但设计更严谨，尤其适配 Web3 项目的依赖管理需求。
+
+**Hello World 示例**
+
+```go
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("hello go")
+}
+```
+
+- `package main`：声明这是可独立运行的程序（类似 Python 把代码放 `main.py` 作为入口）
+- `import "fmt"`：导入标准库的打印工具（类似 Python `import print`，但 Python 直接内置 print 不用导）
+- `func main() { ... }`：程序入口函数（类似 Python `if __name__ == "__main__":` 代码块，启动后自动执行）
+- `fmt.Println("hello go")`：打印字符串（完全等价 Python `print("hello go")`）
+
+整体：和 Python 写 `print("hello go")` 并运行一样，就是输出字符串，核心是 Go 强制要「入口包 + 入口函数」的规范。
+
+##### Q5: 使用 Go 连接以太坊（代码示例）
+
+```go
+// 声明当前文件属于main包（Go程序入口包，必须为main才能独立运行）
+package main
+
+// 批量导入依赖包（标准库+以太坊Web3相关库）
+import (
+	"context"   // 标准库：用于请求上下文（控制超时、取消，Web3查链/发交易必备）
+	"fmt"        // 标准库：格式化打印输出
+	"log"        // 标准库：日志打印（含错误退出功能）
+	"math/big"   // 标准库：处理大整数（Web3区块号、金额等超大数据需用）
+
+	// 以太坊官方Web3库：common（通用工具）、ethclient（节点客户端）
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
+)
+
+// 程序入口函数（类似Python的if __name__ == "__main__": 代码块）
+func main() {
+	// 创建默认上下文（无超时/取消条件，Web3方法需传入上下文参数）
+	ctx := context.Background()
+
+	// 连接Sepolia测试网RPC节点，返回客户端实例和错误信息
+	// 类比Python：w3 = Web3(Web3.HTTPProvider("rpc_url"))
+	client, err := ethclient.Dial("https://ethereum-sepolia-rpc.publicnode.com")
+	// 错误处理：若连接失败，打印错误并退出程序（Go强制显式处理错误）
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 延迟执行：程序结束前关闭节点连接（避免资源泄露，类似Python with语句自动关闭）
+	defer client.Close()
+
+	// 通过客户端查询最新区块头信息（第二个参数nil表示查询最新区块）
+	header, err := client.HeaderByNumber(ctx, nil)
+	// 错误处理：查询失败则打印错误并退出
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 打印最新区块号（header.Number是big.Int类型，需转字符串避免打印异常）
+	fmt.Printf("Current block: %s\n", header.Number.String())
+
+	// 创建指定区块号（123456）的大整数实例（Web3区块号需用big.Int存储）
+	targetBlock := big.NewInt(123456)
+	// 查询指定区块的完整信息
+	block, err := client.BlockByNumber(ctx, targetBlock)
+	// 错误处理：查询失败则打印错误并退出
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 打印指定区块的区块号、哈希、父哈希、交易数量
+	fmt.Printf("Block #%s hash: %s\n", block.Number().String(), block.Hash().Hex())
+	fmt.Printf("Parent hash: %s\n", block.ParentHash().Hex())
+	fmt.Printf("Tx count: %d\n", len(block.Transactions()))
+
+	// 定义要查询的交易哈希，通过common.HexToHash转成Go的Hash类型（Web3哈希专用类型）
+	txHash := common.HexToHash("0x903bd6b44ce5cfa9269d456d2e7a10e3d8a485281c1c46631ec8f79e48f7accb")
+
+	// 通过交易哈希查询交易详情：返回交易实例、是否pending、错误
+	tx, isPending, err := client.TransactionByHash(ctx, txHash)
+	// 错误处理：查询失败则打印错误并退出
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 打印交易是否处于pending状态
+	fmt.Printf("Tx pending: %t\n", isPending)
+	// 获取交易接收地址（to为指针，nil表示合约创建交易）
+	if to := tx.To(); to != nil {
+		// 若接收地址存在，打印地址的16进制格式
+		fmt.Printf("To: %s\n", to.Hex())
+	} else {
+		// 若为nil，说明是合约部署交易
+		fmt.Println("To: contract creation")
+	}
+	// 打印交易金额（以wei为单位，转字符串避免大整数打印异常）
+	fmt.Printf("Value (wei): %s\n", tx.Value().String())
+
+	// 通过交易哈希查询交易收据（包含交易状态、日志等信息）
+	receipt, err := client.TransactionReceipt(ctx, txHash)
+	// 错误处理：查询失败则打印错误并退出
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 打印交易状态（0=失败，1=成功）、日志条目数量
+	fmt.Printf("Receipt status: %d\n", receipt.Status)
+	fmt.Printf("Logs: %d entries\n", len(receipt.Logs))
+}
+```
+
+##### Q6: 区块链核心数据结构解析
+
+###### 一、Block（区块）关键字段（Web3 场景含义）
+
+一个区块含有很多个交易。
+
+| 字段 | Web3 场景核心含义 |
+|------|-------------------|
+| **number** | 区块的唯一顺序标识（创世区块为 0，后续递增），是查询历史链上数据的核心索引，代表区块在链上的位置。 |
+| **hash** | 由区块所有内容（交易、时间戳、parentHash 等）通过哈希算法生成的唯一 32 字节 16 进制值，是区块的「数字指纹」，任何内容篡改都会导致 hash 变化，保证区块不可篡改。 |
+| **parentHash** | 当前区块的上一个（父）区块的 hash，是区块链「链式结构」的核心：每个区块都锚定前一个区块，形成不可篡改的链式账本。 |
+| **timestamp** | 区块被矿工打包的 Unix 时间戳（秒级），记录区块生成的时间，用于追溯交易发生的时间范围。 |
+| **gasUsed** | 该区块内所有交易实际消耗的 Gas 总量，反映区块内交易的总计算量，是衡量区块「负载」的指标。 |
+| **gasLimit** | 单个区块允许消耗的最大 Gas 总量（全网节点共识调整），是区块的「计算资源上限」，限制区块内交易的数量和复杂度，避免网络因超大计算量交易拥堵。 |
+| **transactions** | 区块内包含的所有交易列表（转账、合约交互、合约部署等），是区块的核心内容，链上所有价值转移和合约执行都记录在此。 |
+
+**Follow-Up 解答**
+
+1. **为何 parentHash 能形成区块链？**
+   每个区块的 parentHash 都指向其前一个区块的 hash，意味着：
+   - **链式关联**：所有区块按「创世区块→第 1 块→第 2 块→…→最新块」的顺序形成不可逆的链；
+   - **防篡改**：若篡改某一历史区块的内容（如修改交易金额），该区块的 hash 会立即改变，而后续所有区块的 parentHash 都指向该区块的旧 hash，导致后续整条链的合法性失效，全网节点会拒绝该篡改链；
+   - 最终形成「牵一发而动全身」的不可篡改链式结构，这是区块链的核心特性。
+
+2. **gasLimit 如何影响合约执行？**
+   Gas 是以太坊网络的计算资源单位，合约执行的每一步（如算术运算、存储读写）都消耗固定 Gas：
+   - 区块 gasLimit 是「单区块所有交易 Gas 消耗的总和上限」：若一笔合约交易的 Gas 需求超过区块剩余 gasLimit，会被拒绝打包；
+   - 若合约执行中消耗的 Gas 超过「交易自身设定的 Gas 上限」或「区块剩余 gasLimit」，EVM 会立即中断合约执行，所有状态（如转账、余额修改）回滚，且已消耗的 Gas 不退还（防止恶意合约无限循环占用网络资源）；
+   - 高 gasLimit 区块可容纳更多 / 更复杂的合约交易，但也会增加区块验证时间，全网会动态平衡 gasLimit 以兼顾效率和安全性。
+
+###### 二、Transaction（交易）关键字段（Web3 场景含义）
+
+| 字段 | Web3 场景核心含义 |
+|------|-------------------|
+| **nonce** | 交易发送地址的「交易序号」（从 0 开始递增，每个地址独立计数），核心作用是防止交易重放攻击：同一地址的交易必须按 nonce 顺序执行，重复 / 乱序 nonce 的交易会被节点拒绝。 |
+| **from / to** | **from**：交易发起地址（私钥签名者）；**to**：交易接收地址（普通转账 = 接收 ETH 地址，合约交互 = 目标合约地址，为空 = 合约部署交易）。 |
+| **input (call data)** | 16 进制字符串格式的「合约调用指令集」：普通转账为空，合约交互时包含「函数选择器（前 4 字节）+ 编码后的参数」，是外部触发合约执行的核心数据。 |
+| **gas / gasPrice** | **gas**：交易发起者设定的「本次交易允许消耗的最大 Gas 量」；**gasPrice**：legacy 交易中「每单位 Gas 的手续费单价（wei）」，Gas * gasPrice = 总手续费，单价越高越易被矿工优先打包。 |
+| **value** | 交易中转账的 ETH 金额（以 wei 为单位，1 ETH = 10^18 wei）：普通转账 = 实际转账金额，合约交互 = 打给合约的 ETH 金额（合约可通过代码接收 / 处理）。 |
+| **type** | 交易类型：0=legacy（旧版交易，用 gasPrice 定手续费）；2=EIP-1559（新版交易，用 maxFeePerGas（最高手续费）+ maxPriorityFeePerGas（矿工小费）替代 gasPrice，手续费更灵活）。 |
+
+**Follow-Up 解答**
+
+1. **什么是 ABI？**
+   ABI（Application Binary Interface）是以太坊合约与外部（钱包、DApp、节点）交互的「标准化协议」，本质是合约的「接口说明书」：
+   - **定义内容**：合约的函数名 / 参数类型 / 返回值类型、事件名 / 参数类型、错误码等；
+   - **核心作用**：作为「人类可读逻辑」和「机器可执行二进制数据」的转换桥梁，没有 ABI 无法解析合约的 input 数据，也无法调用合约函数。
+
+2. **一笔交易最终执行逻辑是如何解析 input 的？**
+   以调用合约 transfer 函数为例，EVM 解析 input 的核心流程：
+   - **编码阶段**：外部通过 ABI 将「函数名 + 参数」编码为 input 数据（前 4 字节 = 函数选择器，是函数签名的哈希前 4 字节，用于识别函数；后续字节 = 参数的标准化编码，如地址 / 数字转 32 字节）；
+   - **执行阶段**：交易打包后，EVM 读取 input 数据，先取前 4 字节函数选择器，匹配合约代码中对应的函数；
+   - **解码阶段**：按 ABI 定义的参数类型，解码 input 后续字节的参数；
+   - **执行阶段**：EVM 执行该函数的字节码逻辑（如修改余额、转账），消耗对应 Gas；
+   - **结果阶段**：执行完成后返回结果（或写入事件日志），若 Gas 不足则中断并回滚状态。
+
+###### 三、Receipt（交易收据）关键字段（Web3 场景含义）
+
+| 字段 | Web3 场景核心含义 |
+|------|-------------------|
+| **status** | 交易执行状态：0 = 失败（如 Gas 不足、合约逻辑报错），1 = 成功；是判断交易是否生效的核心指标，仅交易被打包后才有 receipt，pending 交易无 receipt。 |
+| **logs** | 交易触发的合约事件日志列表（由合约内 emit 语句生成），包含事件名、参数、合约地址等，是链下监听合约状态（如转账到账、NFT 铸造）的核心数据。 |
+| **contractAddress** | 仅「合约部署交易」有值，是新部署合约在链上的唯一地址（由部署者地址 + nonce 计算生成）；非合约部署交易该字段为空。 |
+
+**总结**
+
+- **Block** 的核心是「不可篡改的链式结构」，parentHash 锚定历史、gasLimit 控制网络负载；
+- **Transaction** 的 input 是合约交互的核心，需通过 ABI 编码 / 解码才能被 EVM 执行；
+- **Receipt** 是交易执行后的「凭证」，status 判成败、logs 取事件、contractAddress 仅合约部署有效。
 
 
 
