@@ -275,7 +275,7 @@ def get_all_user_files():
     递归查找所有用户文件，支持子文件夹中的 .md 文件
     返回格式: (nickname, relative_path)
     """
-    exclude_prefixes = ('template', 'readme')
+    ALLOWED_DIRS = {'DeFi', 'Onchain-data', 'Security'}
     user_files = []
     
     # 递归遍历所有目录
@@ -284,24 +284,28 @@ def get_all_user_files():
         if '.git' in root:
             continue
             
+        # Check if current directory is within allowed directories
+        norm_root = os.path.normpath(root)
+        path_parts = norm_root.split(os.sep)
+        
+        # Only process files in allowed directories
+        if not any(d in ALLOWED_DIRS for d in path_parts):
+            continue
+
         for f in files:
             if f.lower().endswith(FILE_SUFFIX.lower()):
-                # 检查是否应该排除
-                should_exclude = False
-                for prefix in exclude_prefixes:
-                    if f.lower().startswith(prefix):
-                        should_exclude = True
-                        break
+                # Exclude README.md and Template files
+                if f.lower() == 'readme.md' or f.lower().startswith('template'):
+                    continue
                 
-                if not should_exclude:
-                    # 获取相对路径
-                    rel_path = os.path.join(root, f)
-                    # 标准化路径（处理 ./ 前缀）
-                    if rel_path.startswith('./'):
-                        rel_path = rel_path[2:]
-                    # 获取文件名（不含扩展名）作为 nickname
-                    nickname = f[:-len(FILE_SUFFIX)]
-                    user_files.append((nickname, rel_path))
+                # 获取相对路径
+                rel_path = os.path.join(root, f)
+                # 标准化路径（处理 ./ 前缀）
+                if rel_path.startswith('./') or rel_path.startswith('.\\'):
+                    rel_path = rel_path[2:]
+                # 获取文件名（不含扩展名）作为 nickname
+                nickname = f[:-len(FILE_SUFFIX)]
+                user_files.append((nickname, rel_path))
     
     # 如果文件在子文件夹中，使用相对路径作为标识
     # 否则使用文件名
@@ -309,7 +313,9 @@ def get_all_user_files():
     for nickname, rel_path in user_files:
         if os.path.dirname(rel_path):  # 在子文件夹中
             # 使用相对路径作为标识，但去掉扩展名
-            result.append(rel_path[:-len(FILE_SUFFIX)])
+            # Ensure forward slashes for consistency
+            identifier = rel_path[:-len(FILE_SUFFIX)].replace('\\', '/')
+            result.append(identifier)
         else:  # 在根目录
             result.append(nickname)
     
