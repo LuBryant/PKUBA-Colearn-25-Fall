@@ -23,4 +23,72 @@ timezone: UTC+8
 
 ### 2025.07.12
 
+### 2025.12.4
+
+1.下载go
+
+![image-20251204125513243](C:\Users\yawn\AppData\Roaming\Typora\typora-user-images\image-20251204125513243.png)
+
+2.了解了以太坊运行机制
+
+3.运行第一个go程序
+
+![image-20251204131052163](C:\Users\yawn\AppData\Roaming\Typora\typora-user-images\image-20251204131052163.png)
+
+ 4.安装 go-ethereum 库
+
+![image-20251204133143857](C:\Users\yawn\AppData\Roaming\Typora\typora-user-images\image-20251204133143857.png)
+
+### 2025.12.5
+
+打印结果：
+
+Current block: 9771744
+Block #123456 hash: 0x2056507046b07a5d7ed4f124a7febce2aec7295b464746523787b8c2acc627dc
+Parent hash: 0x93bff867b68a2822ee7b6e0a4166cfdf5fc4782d60458fae1185de9b2ecdba16
+Tx count: 0
+2025/12/05 11:20:27 not found
+exit status 1
+
+#发现有一些问题，没有查询到质押交易的数量`tx count`
+
+上一节中查询到的数据会包含大量字段。本部分任务要求理解其中关键字段的含义。
+
+关于 Block 建议理解的字段包括：
+
+- number
+- hash
+- parentHash
+- timestamp
+- gasUsed / gasLimit
+- transactions
+
+Follow-Up：
+
+- 为何 parentHash 能形成区块链？
+- gasLimit 如何影响合约执行
+
+***
+
+关于 Transcation 建议理解的字段包括：
+
+- nonce 一个由交易发送者发出的交易序列号，用于确保交易顺序和防止重放攻击。
+- from / to
+- input (call data)
+- gas / gasPrice
+- value
+- type (legacy, EIP-1559)
+
+Follow-Up：
+
+- 什么是 ABI ？一笔交易最终执行逻辑是如何解析 input 的
+
+***
+
+关于 Receipt 建议理解的字段包括:
+
+- status
+- logs
+- contractAddress
+
 <!-- Content_END -->

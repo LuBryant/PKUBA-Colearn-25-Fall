@@ -123,8 +123,9 @@
 | [Onchain-data/aliced-crypto](https://github.com/qingoba/PKUBA-Colearn-25-Fall/blob/main/Onchain-data/aliced-crypto.md) | ✅ | ✅ |   | | | | | |
 | [Onchain-data/rayHartley](https://github.com/qingoba/PKUBA-Colearn-25-Fall/blob/main/Onchain-data/rayHartley.md) | ⭕️ | ⭕️ | ✅ | | | | | |
 | [DeFi/pandmonkey](https://github.com/qingoba/PKUBA-Colearn-25-Fall/blob/main/DeFi/pandmonkey.md) | ⭕️ | ⭕️ | ✅ | | | | | |
-| [DeFi/Yawnaa](https://github.com/qingoba/PKUBA-Colearn-25-Fall/blob/main/DeFi/Yawnaa.md) | ⭕️ | ⭕️ |   | | | | | |
+| [DeFi/Yawnaa](https://github.com/qingoba/PKUBA-Colearn-25-Fall/blob/main/DeFi/Yawnaa.md) | ⭕️ | ⭕️ | ✅ | | | | | |
 <!-- END_COMMIT_TABLE -->
+
 
 
 
