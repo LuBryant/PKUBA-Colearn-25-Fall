@@ -33,6 +33,6 @@ timezone: UTC+8
 - [x] 成功记录: <img width="2880" height="1584" alt="image" src="https://github.com/user-attachments/assets/78014bb4-c853-4dc7-bf98-0b253d32bfe6" />
 
 ### 2025.12.07
-
+学习B站肖臻老师的区块链课程ETH部分
 
 <!-- Content_END -->
