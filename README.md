@@ -125,7 +125,9 @@
 | [DeFi/pandmonkey](https://github.com/qingoba/PKUBA-Colearn-25-Fall/blob/main/DeFi/pandmonkey.md) | ⭕️ | ⭕️ | ✅ | | | | | |
 | [DeFi/Yawnaa](https://github.com/qingoba/PKUBA-Colearn-25-Fall/blob/main/DeFi/Yawnaa.md) | ⭕️ | ⭕️ | ✅ | | | | | |
 | [DeFi/1248368338-droid](https://github.com/qingoba/PKUBA-Colearn-25-Fall/blob/main/DeFi/1248368338-droid.md) | ⭕️ | ⭕️ |   | | | | | |
+| [Onchain-data/LuBryant](https://github.com/qingoba/PKUBA-Colearn-25-Fall/blob/main/Onchain-data/LuBryant.md) | ⭕️ | ⭕️ |   | | | | | |
 <!-- END_COMMIT_TABLE -->
+
 
 
 
