@@ -27,5 +27,32 @@ timezone: UTC+8
 #### Part 2
 <img width="2486" height="1222" alt="Pasted image 20251130185024" src="https://github.com/user-attachments/assets/6eb3cc3d-b6f9-4579-bb09-9f9b075ced06" />
 
+### 2025.12.07
+1. 区块链结构
+parentHash → 哈希链
+任意区块被改动 → 所有后续区块 hash 变化 → 历史不可篡改性成立。
+
+2. 以太坊状态改变的最小单位。关键字段：nonce, to, value, input, gas.
+
+3. nonce（顺序 + 防重放）
+每个账户独有的交易计数器。保证交易按序执行。阻止同一交易在未来或其他链被重放。
+
+4. ABI 调用（input 字段）
+交易调用合约的本质：
+input = 函数选择器(4B) + 参数编码
+EVM 依据 input 定位函数并执行。
+EVM 不认识函数名，只认识 selector。
+
+5. Receipt（执行结果）
+核心字段：status、logs、contractAddress、gasUsed.
+status 是唯一可信的成功/失败判断依据。
+logs = 合约事件，用于链下监听与索引。
+
+6. RPC（访问链上数据的入口）
+不需自己实现 P2P，只需调用 RPC：
+eth_blockByNumber
+eth_getTransactionByHash
+eth_getTransactionReceipt
+
 
 <!-- Content_END -->
