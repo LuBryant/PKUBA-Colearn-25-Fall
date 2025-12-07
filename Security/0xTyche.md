@@ -163,6 +163,51 @@ https://sepolia.etherscan.io/tx/0x91e72d0a469e800d7f44f2a02b40518128a5a59eea8124
 
 
 
-### 2025.07.12
+### 2025.12.07
+
+转账哈希：0x6ea04b5764b8db4cc59f7f3f872a45df6fcc0b9d1b8345c4725786de052d0051
+
+本周目标：
+
+学会用 Geth 的 Go 客户端从 RPC 节点读取链上信息
+理解区块链底层数据结构（block、transaction、receipt）
+这些是做 DApp、链上分析、合约调试等的基础。
+
+2. 节点：运行客户端的软件实例
+从功能和数据完整性角度分析，节点可以分为
+- 全节点：保存当前完整状态和必要的历史数据，可以独立验证新区块和交易；
+- 轻节点：只保存少量数据和区块头，需要向其他节点请求详细信息；
+- 归档节点：不仅保存当前状态，还保存所有历史状态，方便做历史查询和分析，但资源消耗很大。
+
+有矿工/验证者节点把交易打包进入区块，交易才算真正的上链。
+
+3. rpc 给外部程序调用的接口
+RPC（Remote Procedure Call，远程过程调用）是节点向外暴露的一组标准接口，用来让其他程序查询或提交数据，常见是 HTTP RPC 或 WebSocket RPC。
+
+Geth（Go Ethereum）是用 Go 语言实现的以太坊客户端，也是目前使用最广泛的实现之一。
+【看来Go学习也要提上日程了】
+
+公共的Sepolia rpc：https://ethereum-sepolia-rpc.publicnode.com
+
+Go 客户端库
+Geth 提供了一套Go客户端库，方便Go代码和以太坊交互，常用的是ethclient包。
+```Go
+    import (
+        "context"
+        "github.com/ethereum/go-ethereum/ethclient"
+    )
+    func main(){
+        // 连接公共 rpc
+        client, err := ethclient.Dial("https://ethereum-sepolia-rpc.publicnode.com")
+
+        // 也可以使用个人节点
+        // client, err := ethclient.Dial("https://your-server-ip:8545") 和 anvil fork 出一个节点类似
+
+        if err != nil {
+            panic(err)
+        }
+        defer client.Close()
+    }
+```
 
 <!-- Content_END -->
