@@ -49,7 +49,7 @@ contract HelloWeb3 {
 
 ![image](https://github.com/henrymartin262/PKUBA-Colearn-25-Fall/blob/main/img/Snipaste_2025-11-22_18-23-45.png)
 
-### 2025.11.24
+### 2025.11.25
 
 #### Part II - 智能合约编写
 
@@ -125,7 +125,7 @@ contract Week1Solver {
 
 ![image](https://github.com/henrymartin262/PKUBA-Colearn-25-Fall/blob/main/img/Snipaste_2025-11-22_19-03-42.png)
 
-### 2025.12.07
+### 2025.12.09
 
 通过 Week3.md 中的内容学习了使用Geth读取链上数据，对基本概念有了一些了解，同时完成本地环境搭建，并使用go-ethereum打印出完整链上数据，以下是相关代码：
 
@@ -346,6 +346,434 @@ func main() {
 - **`contractAddress`**:
   - 只有当交易是**部署新合约**时，这个字段才会有值（即新生成的合约地址）。
   - 对于普通转账或调用，该字段为空。
+
+
+
+
+### 2025.12.13
+
+#### Part I. FilterLogs
+
+掌握使用 `ethclient` 库进行以下操作：
+
+1. **历史数据查询：** 通过 `FilterLogs` 高效过滤和分页查询历史合约事件（Logs）。
+2. **实时数据监控：** 使用 `SubscribeNewHead` 和 `SubscribePendingTransactions` 实时监听新区块和待处理交易。
+3. **链上状态读取：** 使用 `CallContract` 读取合约的只读状态，并探索回溯到任意历史状态的能力。
+
+
+
+知识点学习：
+
+- FilterLogs 提取日志信息
+- **Topics** 过滤和查找事件
+- **Event Signature（事件签名）**，在日志中识别特定类型的事件
+
+
+
+任务完成：
+
+实现了**根据合约地址和事件签名过滤历史日志**的功能
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"math/big"
+	"time"
+
+	// 新增了处理网络连接的包
+	"net/http"
+	// "net/url"
+
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc" // 用于配置自定义的 http.Client
+)
+
+// ------------------------------------------------
+// ⚠️ 关键修改：配置代理和 RPC URL
+// ------------------------------------------------
+
+const (
+	USDCAddress = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+	// InfuraURL   = "https://mainnet.infura.io/v3/85940542d1124d099ddfc3caa6bfe720"
+	InfuraURL = "https://eth.llamarpc.com"
+
+	// ⭐️ 请务必检查并修改为您代理软件监听的 HTTP/SOCKS5 端口
+	PROXY_PORT = "10802"
+
+	// 设置较大的超时时间，应对代理连接延迟
+	CONNECTION_TIMEOUT = 45 * time.Second
+)
+
+func main() {
+	log.Println("开始配置代理并连接到以太坊客户端")
+
+	// 1. 定义代理 URL (已禁用，如需开启请取消注释)
+	/*
+		proxyUrlString := fmt.Sprintf("http://127.0.0.1:%s", PROXY_PORT)
+		proxyUrl, err := url.Parse(proxyUrlString)
+		if err != nil {
+			log.Fatalf("解析代理 URL 失败: %v", err)
+		}
+
+		// 2. 创建自定义 HTTP 传输器，强制使用代理
+		transport := &http.Transport{
+			Proxy: http.ProxyURL(proxyUrl),
+		}
+	*/
+
+	// 3. 创建自定义 HTTP 客户端，设置超时
+	httpClient := &http.Client{
+		// Transport: transport,
+		Timeout: CONNECTION_TIMEOUT,
+	}
+
+	// 4. 使用 rpc.DialHTTPWithClient 将自定义客户端注入到 ethclient
+	rpcClient, err := rpc.DialHTTPWithClient(InfuraURL, httpClient)
+	if err != nil {
+		log.Fatalf("无法创建 RPC 客户端: %v", err)
+	}
+
+	client := ethclient.NewClient(rpcClient)
+	log.Println("连接到以太坊客户端成功 (已配置代理)")
+
+	// ------------------------------------------------
+	// 优化：获取最新区块号并设置查询范围
+	// ------------------------------------------------
+
+	ctx1, cancel1 := context.WithTimeout(context.Background(), CONNECTION_TIMEOUT)
+	defer cancel1()
+
+	log.Println("正在获取最新区块号...")
+
+	// client.HeaderByNumber(ctx, nil) 会使用配置了代理的 client
+	header, err := client.HeaderByNumber(ctx1, nil)
+	var latestBlock int64
+
+	if err != nil {
+		// 如果获取最新区块失败，则输出错误并直接退出，因为无法确定合理的查询范围
+		log.Fatalf("致命错误: 获取最新区块号失败: %v。请检查代理设置和网络连接。", err)
+	}
+
+	latestBlock = header.Number.Int64()
+	log.Printf("最新区块号: %d", latestBlock)
+
+	// 1. 计算 Event Signature 哈希 (Topic 0)
+	transferEventSignature := crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
+
+	// 2. 构造查询参数 (查询最新 100 个区块)
+	const BLOCK_RANGE = 100
+	fromBlock := big.NewInt(latestBlock - BLOCK_RANGE)
+	toBlock := big.NewInt(latestBlock)
+
+	usdcAddr := common.HexToAddress(USDCAddress)
+	log.Printf("查询 USDC 地址: %s", usdcAddr.Hex())
+	log.Printf("查询区块范围: %d 到 %d (共 %d 个区块)", fromBlock.Int64(), toBlock.Int64(), BLOCK_RANGE)
+
+	query := ethereum.FilterQuery{
+		FromBlock: fromBlock,
+		ToBlock:   toBlock,
+		Addresses: []common.Address{usdcAddr},
+		Topics:    [][]common.Hash{{transferEventSignature}},
+	}
+	// 3. 调用 FilterLogs
+	ctx, cancel := context.WithTimeout(context.Background(), CONNECTION_TIMEOUT)
+	defer cancel()
+
+	log.Println("开始查询日志...")
+	logs, err := client.FilterLogs(ctx, query)
+	if err != nil {
+		// 如果查询失败，可能是代理断开或 Infura 限制
+		log.Fatalf("FilterLogs 查询失败: %v。请确保代理稳定。", err)
+	}
+
+	fmt.Printf("✅ 成功: 在区块 %d 到 %d 之间找到了 %d 条 Transfer 事件日志\n",
+		query.FromBlock.Int64(), query.ToBlock.Int64(), len(logs))
+
+	if len(logs) > 0 {
+		log0 := logs[0]
+		fmt.Println("--- 第一条 Log 详情 ---")
+		fmt.Printf("TxHash: %s\n", log0.TxHash.Hex())
+		fmt.Printf("BlockNumber: %d\n", log0.BlockNumber)
+		fmt.Printf("Topics: %v\n", log0.Topics)
+		// 提醒用户需要 ABI 解码
+		fmt.Println("注意: 要获取可读的转账金额，需要使用 ABI 解码 log.Data 字段。")
+	}
+}
+
+```
+
+
+
+运行成功后，输出示例如下：
+
+![image](https://github.com/henrymartin262/PKUBA-Colearn-25-Fall/blob/main/img/Snipaste_2025-12-13_00-22-56.png)
+
+**输出解释：**
+
+| 输出内容                               | 说明                                                         |
+| :------------------------------------- | :----------------------------------------------------------- |
+| **最新区块号: 23997742**               | 当前以太坊主网的最新区块高度                                 |
+| **查询区块范围: 23997642 到 23997742** | 查询最近 100 个区块（23997642 - 23997742）                   |
+| **找到了 10903条 Transfer 事件日志**   | 在指定范围内，USDC 合约共产生了 10903次转账事件              |
+| **TxHash**                             | 包含该事件的交易哈希                                         |
+| **BlockNumber**                        | 该事件所在的区块号                                           |
+| **Topics[0]**                          | `0xddf2...` 是 `Transfer(address,address,uint256)` 的事件签名哈希 |
+| **Topics[1]**                          | `0x000...87f6...` 是转账发送方地址（from，填充至 32 字节）   |
+| **Topics[2]**                          | `0x000...4325...` 是转账接收方地址（to，填充至 32 字节）     |
+| **log.Data**                           | 包含转账金额（需要 ABI 解码才能读取）                        |
+
+**注意：** 代码成功实现了根据合约地址（USDC）和事件签名（Transfer）过滤历史日志的功能。
+
+
+
+#### Part II. Geth 进阶
+
+知识点学习：
+
+- 理解了三层架构模型
+- 使用Subscribe订阅模式完成**监听新区块**，**监听待处理交易**
+
+
+
+**代码实现(参考monitor_setup.go完成)**
+
+**功能完成**：
+
+1. **建立 WebSocket 连接：** 使用 `rpc.DialContext` 连接到本地 Geth 节点
+2. **复用 RPC 连接：** 同时初始化 `ethclient` 和 `gethclient`，共享同一个底层连接
+3. **双通道监听：** 使用 Go 的 `channel` 机制并发监听新区块和待处理交易
+4. **优雅退出：** 捕获系统信号（Ctrl+C），正确关闭订阅和连接
+
+**核心功能：**
+
+- **新区块监听：** 使用 `ethClient.SubscribeNewHead()` 实时获取新区块头信息
+- **交易池监听：** 使用 `gethClient.SubscribePendingTransactions()` 监听 Mempool 中的新交易
+- **错误处理：** 完善的错误处理和重连机制
+- **资源清理：** 程序退出时正确取消订阅并关闭连接
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"math/big"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/ethclient/gethclient"
+	"github.com/ethereum/go-ethereum/rpc"
+)
+
+// 使用 LlamaRPC 的 WebSocket 地址
+const NodeWSS = "wss://eth.llamarpc.com"
+
+func main() {
+	// 1. 设置系统信号监听
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
+
+	log.Println("🔌 正在连接到 WebSocket 节点:", NodeWSS)
+
+	// 2. 建立底层的 RPC 连接
+	rpcClient, err := rpc.Dial(NodeWSS)
+	if err != nil {
+		log.Fatalf("❌ 连接失败: %v", err)
+	}
+	defer rpcClient.Close()
+	log.Println("✅ RPC 连接建立成功")
+
+	// 3. 初始化上层客户端
+	ethClient := ethclient.NewClient(rpcClient)
+	gClient := gethclient.New(rpcClient)
+
+	// 4. 准备数据通道
+	headers := make(chan *types.Header)
+	pendingTxHashes := make(chan common.Hash)
+
+	// 5. 订阅新区块
+	log.Println("🎧 正在订阅新区块 (NewHeads)...")
+	subHeads, err := ethClient.SubscribeNewHead(context.Background(), headers)
+	if err != nil {
+		log.Fatalf("❌ 订阅新区块失败: %v", err)
+	}
+	defer subHeads.Unsubscribe()
+
+	// 6. 订阅待处理交易
+	log.Println("🎧 正在订阅交易池 (PendingTransactions)...")
+	subPending, err := gClient.SubscribePendingTransactions(context.Background(), pendingTxHashes)
+	if err != nil {
+		log.Printf("⚠️ 订阅交易池失败 (可能是节点不支持): %v", err)
+	} else {
+		defer subPending.Unsubscribe()
+	}
+
+	log.Println("🚀 监控已启动！按 Ctrl+C 停止...")
+
+	// 7. 主循环
+	for {
+		select {
+		// Case A: 收到新区块 - 打印丰富信息
+		case head := <-headers:
+			// 计算 Gas 使用率
+			gasUtil := float64(head.GasUsed) / float64(head.GasLimit) * 100
+
+			// 转换 BaseFee 到 Gwei (如果存在)
+			baseFee := "0"
+			if head.BaseFee != nil {
+				bf := new(big.Float).SetInt(head.BaseFee)
+				bf.Quo(bf, big.NewFloat(1e9)) // Wei -> Gwei
+				baseFee = fmt.Sprintf("%.2f", bf)
+			}
+
+			// 格式化时间
+			blockTime := time.Unix(int64(head.Time), 0).Format("15:04:05")
+
+			fmt.Printf("\n📦 [新区块] #%d\n", head.Number.Uint64())
+			fmt.Printf("   ├─ Hash:     %s\n", head.Hash().Hex())
+			fmt.Printf("   ├─ Time:     %s\n", blockTime)
+			fmt.Printf("   ├─ Miner:    %s\n", head.Coinbase.Hex())
+			fmt.Printf("   ├─ BaseFee:  %s Gwei\n", baseFee)
+			fmt.Printf("   └─ Gas:      %d / %d (%.1f%%)\n", head.GasUsed, head.GasLimit, gasUtil)
+
+		// Case B: 收到待处理交易 - 尝试获取详情
+		case txHash := <-pendingTxHashes:
+			// 启动一个 goroutine 去获取详情，避免阻塞主循环
+			go func(hash common.Hash) {
+				// 注意：频繁调用 TransactionByHash 可能会被公共节点限流
+				tx, isPending, err := ethClient.TransactionByHash(context.Background(), hash)
+				if err != nil {
+					// 获取失败只打印 Hash
+					// fmt.Printf("🌊 [Pending] %s (详情获取失败)\n", hash.Hex())
+					return
+				}
+
+				if isPending {
+					// 转换 Value 到 Ether
+					val := new(big.Float).SetInt(tx.Value())
+					val.Quo(val, big.NewFloat(1e18))
+
+					toAddr := "Contract Creation"
+					if tx.To() != nil {
+						toAddr = tx.To().Hex()
+					}
+
+					fmt.Printf("🌊 [Pending] %s\n", hash.Hex())
+					fmt.Printf("   └─ To: %s | Val: %.4f ETH\n", toAddr, val)
+				}
+			}(txHash)
+
+		// Case C: 订阅出错
+		case err := <-subHeads.Err():
+			log.Fatalf("❌ 区块订阅中断: %v", err)
+
+		// Case D: 交易池订阅出错
+		case err := <-(func() <-chan error {
+			if subPending != nil {
+				return subPending.Err()
+			}
+			return nil
+		}()):
+			if err != nil {
+				log.Printf("⚠️ 交易池订阅中断: %v", err)
+			}
+
+		// Case E: 退出
+		case <-interrupt:
+			log.Println("\n🛑 接收到退出信号，正在关闭连接...")
+			return
+		}
+	}
+}
+
+```
+
+**预期输出：**
+
+```text
+go run ./monitor_setup.go
+2025/12/13 10:18:29 🔌 正在连接到 WebSocket 节点: wss://eth.llamarpc.com
+2025/12/13 10:18:30 ✅ RPC 连接建立成功
+2025/12/13 10:18:30 🎧 正在订阅新区块 (NewHeads)...
+2025/12/13 10:18:31 🎧 正在订阅交易池 (PendingTransactions)...
+2025/12/13 10:18:31 🚀 监控已启动！按 Ctrl+C 停止...
+🌊 [Pending] 0xde92b80b652c56f88330a161aa0cc27e83d991005ac7bd78e2a9e81b25fa595f
+   └─ To: 0x02c1Ea389faf4b1f6c9b6037D83741d268A77c36 | Val: 0.0001 ETH
+🌊 [Pending] 0xaf0e16a23a879e53fcde924da3d50c7bcfa2eb2f0a18e0c00d703dc86b792bce
+   └─ To: 0xDFaa75323fB721e5f29D43859390f62Cc4B600b8 | Val: 0.0584 ETH
+🌊 [Pending] 0x1109aa8f8a0256537401379edfbd65db01023a4ea08497e1e310f58e0686dcbd
+   └─ To: 0x9C859C57e207A5555579B2C776f7Ab862635D47b | Val: 0.0001 ETH
+🌊 [Pending] 0x48922d3821708adcd613f4ed87c12c1fdae219e430038941f9daeea66734d751
+   └─ To: 0x841c38e22Fe0F40b97E931600515892aFb59e350 | Val: 0.0102 ETH
+🌊 [Pending] 0x1e0572938dfe3d78649ace3fbb00e3b284caffc469cc7bcba9bdfbb4c6367fc7
+   └─ To: 0x1AB4973a48dc892Cd9971ECE8e01DcC7688f8F23 | Val: 0.0018 ETH
+🌊 [Pending] 0x0d8163d01c6c676c0f32040ffd517537ea38685a510ac20fb58674a8d8e55fcc
+   └─ To: 0x1AB4973a48dc892Cd9971ECE8e01DcC7688f8F23 | Val: 0.0013 ETH
+🌊 [Pending] 0x8e2b28b35db413dcae10d792ed648c13e4686de677a899f371e7093cb398098a
+   └─ To: 0x6fB3e0A217407EFFf7Ca062D46c26E5d60a14d69 | Val: 0.0000 ETH
+📦 [新区块] #24000660
+   ├─ Hash:     0x636804e440fc225c3d4ae231498f34caff9c58f54f89f016a33854cc7db75b4a
+   ├─ Time:     10:18:35
+   ├─ Miner:    0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97
+   ├─ BaseFee:  0.03 Gwei
+   └─ Gas:      22612112 / 60000000 (37.7%)
+🌊 [Pending] 0xb92ca17d036101accdc7819658feb1318e448ffd07ce5fd16c48c9b2a965928f
+   └─ To: 0x1AB4973a48dc892Cd9971ECE8e01DcC7688f8F23 | Val: 0.0018 ETH
+🌊 [Pending] 0x6d6f285c8fcb656aae329a659f0008816562b7523495357a67041ff611a28456
+   └─ To: 0x1AB4973a48dc892Cd9971ECE8e01DcC7688f8F23 | Val: 0.0019 ETH
+🌊 [Pending] 0x6dbea0934a574ab54aed8ab947612dcd397867b9f1b8e330f7c0378a32df0cac
+   └─ To: 0xBBbbCA6A901c926F240b89EacB641d8Aec7AEafD | Val: 0.0000 ETH
+🌊 [Pending] 0x89cbce7606bbac786398ad4e129b80c8bebbc817b4338c47632d155e340634e5
+   └─ To: 0x6fB3e0A217407EFFf7Ca062D46c26E5d60a14d69 | Val: 0.0000 ETH
+🌊 [Pending] 0x183d5cf0ce580e754c8ed23a02cf4c1056c242d05d584b84aba2ef42043ef550
+   └─ To: 0x1AB4973a48dc892Cd9971ECE8e01DcC7688f8F23 | Val: 0.0017 ETH
+📦 [新区块] #24000661
+   ├─ Hash:     0xc27cd8730c9ffb4015287739821ea83bbfc9e0cf721fe3b73b35c6f5f2e5df14
+   ├─ Time:     10:18:47
+   ├─ Miner:    0x396343362be2A4dA1cE0C1C210945346fb82Aa49
+   ├─ BaseFee:  0.03 Gwei
+   └─ Gas:      53188236 / 60000000 (88.6%)
+```
+
+**输出解释：**
+
+**1. 新区块 (New Block)**
+
+| 字段        | 示例值            | 含义                 | 详细解释                                                     |
+| ----------- | ----------------- | -------------------- | ------------------------------------------------------------ |
+| **高度**    | `#24000514`       | **Block Number**     | 区块链的“页码”。它是连续递增的，代表这是以太坊历史上的第几个区块。 |
+| **Hash**    | `0xc163...`       | **Block Hash**       | 区块的唯一数字指纹。只要区块内任何数据（交易、时间等）发生微小变化，这个哈希值就会完全改变。 |
+| **Time**    | `15:04:05`        | **Timestamp**        | 区块产生的时间。在以太坊 PoS 机制下，通常每 12 秒产生一个新区块。 |
+| **Miner**   | `0x690B...`       | **Fee Recipient**    | **打包者/验证者地址**。也就是成功打包这个区块并获得奖励（小费 + MEV）的那个节点的钱包地址。 |
+| **BaseFee** | `5.23 Gwei`       | **Base Fee**         | **基础费率**。这是当前网络拥堵程度的晴雨表。用户发起交易至少要支付这个单价的 Gas 费，这部分费用会被直接销毁（Burn）。 |
+| **Gas**     | `15M / 30M (50%)` | **Gas Used / Limit** | **区块空间利用率**。`15M` 是实际使用的 Gas，`30M` 是区块最大容量。如果利用率持续超过 50%，BaseFee 就会上涨；反之则下跌。 |
+
+**2. 待处理交易 (Pending Transaction)**
+
+| 字段           | 示例值       | 含义          | 详细解释                                                     |
+| -------------- | ------------ | ------------- | ------------------------------------------------------------ |
+| **Pending Tx** | `0x8129...`  | **Tx Hash**   | 交易的唯一 ID。此时它还在内存池（Mempool）中排队，**尚未**被打包进区块，因此状态是不确定的。 |
+| **To**         | `0xeF73...`  | **Recipient** | **接收方地址**。如果是普通转账，就是收款人；如果是调用合约，就是合约地址；如果是 `Contract Creation`，说明这是在部署新合约。 |
+| **Val**        | `0.0292 ETH` | **Value**     | **交易金额**。发送方随交易附带转移的 ETH 数量（不包含 Gas 费）。 |
+
+- **[新区块]** 日志告诉你**过去**发生了什么（已经确认的事实）。
+- **[Pending]** 日志告诉你**未来**可能发生什么（正在排队的意图）。
+
+
+
 
 
 

@@ -2,7 +2,7 @@
 
 # Part II: Geth 进阶
 
-**上周回顾:**
+**回顾:**
 在 Part I 中，我们掌握了 **历史数据的考古**：
 
   * 使用 `FilterLogs` 配合 `Topic` 和 `Event Signature` 精准定位历史事件。
@@ -99,41 +99,7 @@
 ### III. 实战代码 (Code Practice)
 
 #### 环境准备
-
-**前置条件：启动本地 Geth 节点**
-
-使用本地节点可以避免网络代理问题，速度最快且功能最完整。
-
-1. **安装 Geth：**
-   - 访问 [Geth 官网](https://geth.ethereum.org/) 下载并安装
-   - 或使用包管理器：
-     ```bash
-     # macOS
-     brew install ethereum
-     
-     # Linux (Ubuntu/Debian)
-     sudo apt-get install ethereum
-     ```
-
-2. **启动 Geth 节点并启用 WebSocket：**
-   ```bash
-   # 连接到主网并启用 WebSocket
-   geth --mainnet --ws --ws.addr 0.0.0.0 --ws.port 8546 --ws.api eth,net,web3
-   
-   # 或者连接到 Sepolia 测试网（同步更快）
-   geth --sepolia --ws --ws.addr 0.0.0.0 --ws.port 8546 --ws.api eth,net,web3
-   ```
-   
-   **参数说明：**
-   - `--ws`: 启用 WebSocket 服务器
-   - `--ws.addr 0.0.0.0`: 监听所有网络接口（也可以使用 127.0.0.1 仅本地访问）
-   - `--ws.port 8546`: WebSocket 端口（默认 8546）
-   - `--ws.api eth,net,web3`: 启用的 API 命名空间
-
-3. **等待节点同步：**
-   - 首次启动需要同步区块链数据，这可能需要较长时间
-   - 可以使用 `--syncmode light` 启动轻节点模式（同步更快但功能受限）
-   - 或者使用 `--syncmode snap` 使用快照同步（推荐，速度较快）
+  - 代理配置参考part1
 
 **环境配置：**
 
@@ -200,10 +166,5 @@
 | **🌊 [Pending Tx]** | 新交易进入 Mempool，显示交易 Hash |
 | **📦 [New Block]** | 新区块已生成，显示区块高度、哈希和时间戳 |
 
-**注意事项：**
 
-- **交易量巨大：** Mempool 中的交易数量非常大，每秒可能有数百甚至数千笔交易，输出会非常频繁
-- **节点同步：** 确保本地 Geth 节点已完全同步，否则可能无法获取最新的区块和交易
-- **资源消耗：** 运行全节点需要较大的磁盘空间（主网约 1TB+）和内存，建议使用 SSD
-- **轻节点模式：** 如果资源有限，可以使用 `--syncmode light` 启动轻节点，但功能可能受限
 
