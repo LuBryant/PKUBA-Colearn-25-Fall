@@ -239,7 +239,7 @@ rpcUrls := []string{
 - 学习 Layer 2 怎么减少 Gas 成本
 
 
-### 2025.12.07
+### 2025.12.14
 
 #### Part I Geth 进阶学习
 
