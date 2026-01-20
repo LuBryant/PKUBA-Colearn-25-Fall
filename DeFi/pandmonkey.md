@@ -162,4 +162,95 @@ public:
 	- Subgraph: 每个 DApp 的专属数据库 Schema
 	- 使用 GraphQL 查询, 支持 Cursor-based Pagination(比 Skip 方式快)
 
+### 2025.12.22
+
+- **RPC 的局限性:**
+	- RPC 是执行层接口, 适合查询链上"状态", 不适合数据分析
+	- 复杂查询需要扫所有区块和交易, 非常慢
+	- 无法直接查询"哪些地址调用过某合约"或"内部 ETH 转账"
+
+- **Etherscan:**
+	- 中心化系统, 提前整理和索引链上数据
+	- 将链上数据构建为可直接查询的数据表
+	- 提供 HTTP API, 需要注册获取 API Key
+
+- **txlist vs txlistinternal:**
+	- `txlist`: 查询普通外部交易列表, 只显示顶层交易
+	- `txlistinternal`: 查询内部交易, 记录合约执行过程中的 ETH 转移
+	- 内部交易: 通过 CALL opcode 发送 ETH, 不直接出现在交易顶层结构
+	- 应用: 查询 DEX Router 内部调用、合约退款等场景
+
+### 2025.12.29
+
+- **Uniswap V2 核心机制:**
+	- 恒定乘积公式: `x * y = k` (x, y 为池中两种代币数量, k 为常数)
+	- 价格由池中代币比例决定, 交易会改变比例从而改变价格
+	- Pair 合约: 管理流动性池, 执行 swap、mint、burn 操作
+	- Router 合约: 用户接口, 处理路径选择、滑点保护、交易原子性
+
+- **swap 函数:**
+	- 根据输入代币数量计算输出: `amountOut = (amountIn * reserveOut) / (reserveIn + amountIn)`
+	- `_update` 函数更新储备量和累积价格(用于 TWAP 预言机)
+	- 通过检查 `k` 值不变来防止滑点攻击
+
+- **Router 与 Pair 配合:**
+	- 用户调用 Router 的 `swapExactTokensForTokens`
+	- Router 确定交易路径(可能多跳), 依次调用各个 Pair
+	- 使用 `transferFrom` 和 `safeTransfer` 保证原子性(全部成功或全部失败)
+	- `amountOutMin` 参数提供滑点保护
+
+- **流动性管理:**
+	- `mint`: 添加流动性时计算 LP Token = sqrt(x * y) - totalSupply
+	- `burn`: 移除流动性时按比例返还两种代币
+	- 首次添加流动性时 LP Token = sqrt(x * y)
+
+- **价格预言机:**
+	- `price0CumulativeLast` 和 `price1CumulativeLast`: 累积价格, 用于计算 TWAP
+	- TWAP = (priceCumulative[t2] - priceCumulative[t1]) / (t2 - t1)
+	- 可防止价格操纵攻击
+
+### 2026.01.05
+
+- **套利基础:**
+	- 套利: 利用不同 DEX 之间的价格差异获利
+	- 三角套利: A→B→C→A, 最终获得更多 A 代币
+	- 前提: 理解 Uniswap 价格公式, 能计算不同池子的价格差异
+
+- **套利流程:**
+	- 监听 Mempool 中的大额交易(可能改变价格)
+	- 计算套利机会: 比较不同池子的价格, 计算利润
+	- 构造套利交易: 使用 Router 的多跳路径完成套利
+	- 考虑 Gas 成本: 利润必须大于 Gas 费用才有意义
+
+- **MEV (Maximal Extractable Value):**
+	- 矿工/验证者可以提取的最大价值
+	- 包括: 套利、抢跑(front-running)、尾随(back-running)
+	- 通过监听 Pending Transactions 发现机会
+	- 需要高 Gas Price 确保交易优先被打包
+
+- **套利策略要点:**
+	- 价格发现: 实时监控多个池子的储备量
+	- 路径优化: 选择最优交易路径(直接或间接)
+	- 滑点控制: 考虑交易对价格的影响
+	- 原子性: 使用 Flash Loan 或单笔交易完成套利
+
+### 2026.01.12
+
+- **Week6 学习总结:**
+	- Uniswap V2 源码研究: 深入理解 Pair 和 Router 合约的交互机制
+	- 核心收获: 恒定乘积公式 `x * y = k` 是 AMM 定价的基础
+	- swap 函数通过 `_update` 更新储备量和累积价格(用于 TWAP)
+	- Router 处理路径选择、滑点保护、交易原子性
+
+- **套利策略设计思路:**
+	- 监听 Mempool 发现价格变化机会
+	- 实时计算不同池子的价格差异
+	- 构造多跳交易路径实现套利
+	- 考虑 Gas 成本和滑点, 确保利润为正
+
+- **MEV 生态:**
+	- 矿工/验证者可提取的价值包括套利、抢跑、尾随
+	- 需要高 Gas Price 确保交易优先被打包
+	- 通过监听 Pending Transactions 提前发现机会
+
 <!-- Content_END -->

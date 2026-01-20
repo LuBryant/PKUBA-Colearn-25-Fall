@@ -4,8 +4,7 @@ timezone: UTC+8
 
 > 请在上边的 timezone 添加你的当地时区(UTC)，这会有助于你的打卡状态的自动化更新，如果没有添加，默认为北京时间 UTC+8 时区
 
-
-# 你的名字
+# ZhaZhaFon
 
 1. 自我介绍
 ZhaZhaFon，毕业生，某大厂工作ing
@@ -43,5 +42,12 @@ Feng_999
 
 ### 2025.12.14周日
 阅读1-geth.md，学习理解Part1作业。
+
+### 2025.12.21周日
+阅读1-geth.md、2-live-monitoring.md、3-the-graph-graphql.md三个作业，并调试运行对应的例程。
+对Ethereum历史数据查询和日志过滤、订阅模式数据监控、TheGraph有了初步理解。
+
+### 2025.12.28周日
+学习Part2-Etherscan
 
 <!-- Content_END -->

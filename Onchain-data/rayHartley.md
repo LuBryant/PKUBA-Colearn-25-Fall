@@ -38,4 +38,22 @@ timezone: UTC+8
 1. txlist
    <img width="923" height="352" alt="image" src="https://github.com/user-attachments/assets/c4a2fb01-60b8-445a-a778-11d888589e18" />
 
+### 2025.12.20
+
+#### week4 Etherscan
+
+<img width="962" height="391" alt="image" src="https://github.com/user-attachments/assets/3f8e0ba4-2786-4146-81ca-f90b822540ce" />
+
+### 2025.12.28
+
+目前创建了telegrambot
+<img width="1260" height="65" alt="image" src="https://github.com/user-attachments/assets/dec94b2f-006f-47a7-a65a-4f0ff32b1a45" />
+
+### 2026.01.03
+
+运行 telegram.go 文件尝试发送消息
+截图如下：
+
+<img width="537" height="42" alt="image" src="https://github.com/user-attachments/assets/3806342c-c8bc-4d41-9f15-25c3ebc6a108" />
+
 <!-- Content_END -->
